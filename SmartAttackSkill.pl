@@ -1,13 +1,22 @@
 #==========================================================
-# SmartAttackSkill.pl v3.7 — profile-aware + SmartCore + Override melee
-# - Path-safe: never crashes if smart.txt path is not ready at boot
-# - Attack Override: when skill_tester_attack=1 and attackAuto=1/2,
-#   we preempt Core 'attack' and cast skills as primary (still respect attackAuto=0)
-# - Hybrid mode when skill_tester_attack=0 (respect table conditions)
-# - Uses precise cooldown from packet/self_skill_used with adaptive bias
-# - Works with SmartNearestTarget (range from current target if present)
-# - Auto-reloads on smart/config/reloaded and smart_* file changes
-# - Command: smartreload, smartdiag
+# SmartAttackSkill.pl v3.8 – Complete Edition
+# 
+# New in v3.8:
+# - Min SP guard (skill_tester_min_sp)
+# - During route mode (skill_tester_during_route)
+# - Level per skill (column 7 in table)
+# - smartdiag skill command
+# - Target guard (prevent casting without target)
+# 
+# Features:
+# - Profile-aware path detection
+# - SmartCore integration
+# - Attack Override mode
+# - Hybrid mode with table conditions
+# - Precise cooldown from packet/self_skill_used
+# - Works with SmartNearestTarget
+# - Auto-reloads on config changes
+# - Antiflood protection
 #==========================================================
 package SmartAttackSkill;
 
@@ -45,10 +54,11 @@ use constant {
   JITTER_MAX_MS           => 40,
 };
 
-# ---------------- helpers: path safe ----------------
+
+# ---------------- helpers: path safe + profile-aware ----------------
 sub _safe_dir {
   my ($p) = @_;
-  return 'control' unless defined $p && length $p;          # fallback when boot race
+  return 'control' unless defined $p && length $p;
   my $d = eval { dirname($p) };
   return (defined $d && length $d) ? $d : 'control';
 }
@@ -60,20 +70,36 @@ sub _under_control {
   return File::Spec->catfile($base, $fname);
 }
 
-# ---------------- plugin-scope config loaded from smart.txt ----------------
-my %P;  # key -> value (strings)
-
 # SmartCore support (optional)
 sub _smart_core_path {
   my $p;
-  eval { require SmartCore; SmartCore->import(qw(smart_path)); $p = smart_path(); 1; } or do { $p = undef };
+  eval { 
+    require SmartCore; 
+    SmartCore->import(qw(smart_path)); 
+    $p = smart_path(); 
+    1; 
+  } or do { $p = undef };
   return $p;
 }
 
+# Profile-aware smart.txt detection
 sub _default_smart_file {
+  # 1) Try SmartCore first
   my $core = _smart_core_path();
   return $core if defined $core && length $core;
-
+  
+  # 2) Try profile detection
+  my $profile = eval { $Globals::config{profile} } // $config{profile} // '';
+  if ($profile && $profile ne '' && $profile ne 'default') {
+    my $pdir = "profiles/$profile";
+    if (-d $pdir) {
+      my $smart = "$pdir/smart.txt";
+      return $smart if -e $smart;
+      return $smart;
+    }
+  }
+  
+  # 3) Fallback: standard OpenKore path
   my $p = eval { Settings::getControlFilename('smart.txt') } // '';
   return length($p) ? $p : _under_control('smart.txt');
 }
@@ -83,6 +109,9 @@ sub _default_table_file {
   my $dir   = _safe_dir($smart);
   return File::Spec->catfile($dir, 'smart_skill_table.txt');
 }
+
+# ---------------- plugin-scope config loaded from smart.txt ----------------
+my %P;  # ✅ ต้องอยู่ที่นี่!
 
 sub _smart_cfg_file { $P{smart_config_file} // _default_smart_file() }
 sub CFG_TABLEFILE   { $P{skill_tester_table_file} // _default_table_file() }
@@ -94,15 +123,19 @@ sub _str { my ($v,$d)=@_; defined $v && $v ne '' ? $v    : $d }
 sub CFG_ENABLED () { _num($P{skill_tester_enabled},  _num($config{skill_tester_enabled}, 1)) }
 sub CFG_FACTOR  () { my $r=_str($P{skill_tester_factor}, _str($config{skill_tester_factor}, '1.2')); $r=~s/,/./g; my $f=0+$r; $f>0?$f:1.0 }
 sub CFG_LV      () { _num($P{skill_tester_lv},       _num($config{skill_tester_lv}, 5)) }
-sub CFG_ORDER   () { lc _str($P{skill_tester_order}, _str($config{skill_tester_order}, 'alpha')) } # alpha|input
+sub CFG_ORDER   () { lc _str($P{skill_tester_order}, _str($config{skill_tester_order}, 'alpha')) }
 
 # scope flags
 sub CFG_USE_SAVE () { exists $P{skill_tester_use_in_savemap} ? _num($P{skill_tester_use_in_savemap}, 0) : undef }
 sub CFG_USE_LOCK () { exists $P{skill_tester_use_in_lockmap} ? _num($P{skill_tester_use_in_lockmap}, 0) : undef }
-sub CFG_SCOPE    () { lc _str($P{skill_tester_scope}, lc _str($config{skill_tester_scope}, 'any')) } # any|save|lock
+sub CFG_SCOPE    () { lc _str($P{skill_tester_scope}, lc _str($config{skill_tester_scope}, 'any')) }
 
 # attack override flag
-sub CFG_ATTACK  () { _num($P{skill_tester_attack}, _num($config{skill_tester_attack}, 0)) } # 0=Hybrid,1=Override
+sub CFG_ATTACK  () { _num($P{skill_tester_attack}, _num($config{skill_tester_attack}, 0)) }
+
+# v3.8: new config
+sub CFG_MIN_SP  () { _num($P{skill_tester_min_sp}, _num($config{skill_tester_min_sp}, 1)) }
+sub CFG_DURING_ROUTE () { _num($P{skill_tester_during_route}, _num($config{skill_tester_during_route}, 0)) }
 
 # ---------------- state ----------------
 my $hooks;
@@ -122,15 +155,15 @@ my %S = (
   id2handle         => {},
 
   SK_ORDER          => [],
-  SK                => {},   # per-skill state
+  SK                => {},
   ROT_INDEX         => 0,
 
   snt_detected      => 0,
-  override_hold_until => 0,  # prevent Core from re-queueing 'attack' immediately
+  override_hold_until => 0,
 );
 
 # ---------------- register & commands ----------------
-Plugins::register('SmartAttackSkill', 'Table-driven multi-skill + override melee (profile-aware)', \&onUnload);
+Plugins::register('SmartAttackSkill', 'Table-driven multi-skill v3.8', \&onUnload);
 $hooks = Plugins::addHooks(
   ['start3',                   \&onStartup,          undef],
   ['map_loaded',               \&onMapChange,        undef],
@@ -140,7 +173,6 @@ $hooks = Plugins::addHooks(
   ['packet/skill_failed',      \&onSkillUseFailed,   undef],
   ['AI_pre',                   \&onAI,               undef],
 
-  # autoreload ecosystem
   ['smart:file_changed',       \&onSmartFileEvent,   undef],
   ['smart:file_created',       \&onSmartFileEvent,   undef],
   ['smart:file_deleted',       \&onSmartFileEvent,   undef],
@@ -154,6 +186,13 @@ Commands::register(['smartreload', 'Reload smart.txt and smart_skill_table', sub
 }]);
 
 Commands::register(['smartdiag', 'Dump SmartAttackSkill state', sub {
+  my (undef, $args) = @_;
+  
+  if ($args && $args =~ /skill/i) {
+    _diag_skills();
+    return;
+  }
+  
   my $smart = eval { _smart_cfg_file() } // '(undef)';
   my $table = eval { CFG_TABLEFILE() }   // '(undef)';
   my $dir   = _safe_dir($smart);
@@ -168,6 +207,7 @@ Commands::register(['smartdiag', 'Dump SmartAttackSkill state', sub {
   message "control : $dir\n","system";
   message "order   : ".CFG_ORDER()." | default lv=".CFG_LV()." | factor=".sprintf('%.2f',CFG_FACTOR())."\n","system";
   message "attack  : $atkMode (attackAuto=$atkAuto)\n","system";
+  message "min_sp  : ".CFG_MIN_SP()." | during_route: ".CFG_DURING_ROUTE()."\n","system";
 
   if (@{ $S{SK_ORDER} // [] }) {
     my @summ = map {
@@ -185,14 +225,44 @@ Commands::register(['smartdiag', 'Dump SmartAttackSkill state', sub {
   message "------------------------------------\n","system";
 }]);
 
+sub _diag_skills {
+  my $now = time();
+  message "===== SmartAttackSkill :: Skill Details =====\n","system";
+  
+  unless (@{ $S{SK_ORDER} // [] }) {
+    message "  (no skills loaded)\n","info";
+    message "=============================================\n","system";
+    return;
+  }
+  
+  for my $i (0..$#{$S{SK_ORDER}}) {
+    my $id = $S{SK_ORDER}->[$i];
+    my $sk = $S{SK}->{$id};
+    
+    my $ready = ($now >= ($sk->{next_ready}//0)) ? 'READY' : 'WAIT';
+    my $wait_time = ($sk->{next_ready}//0) - $now;
+    $wait_time = 0 if $wait_time < 0;
+    
+    my $conds = '';
+    $conds .= sprintf("[mob>=%d]", $sk->{conds}{mob_ge}) if $sk->{conds}{mob_ge};
+    $conds .= sprintf("[range<=%d]", $sk->{conds}{range_le}) if $sk->{conds}{range_le};
+    $conds .= sprintf("[sp>=%d]", $sk->{conds}{sp_ge}) if $sk->{conds}{sp_ge};
+    
+    message sprintf("  #%d %s (id=%d) lv=%d \@%.2f %s [%s %.1fs]\n",
+        $i+1, $sk->{name}, $id, $sk->{lv}, $sk->{factor},
+        $conds, $ready, $wait_time), "info";
+  }
+  
+  message "=============================================\n","system";
+}
+
 sub onUnload { Plugins::delHooks($hooks) if $hooks; message "[SmartAttackSkill] Unloaded.\n", "system" }
-# ---------------- Public API ----------------
+
 sub is_casting {
     return 1 if $S{inflight};
     return 1 if (time() < $S{override_hold_until});
     return 0;
 }
-
 # ---------------- startup / scope ----------------
 sub onStartup {
   $P{smart_config_file} = $config{smart_config_file} if defined $config{smart_config_file};
@@ -218,7 +288,7 @@ sub _in_scope {
     return 0;
   }
 
-  my $mode = CFG_SCOPE(); # any|save|lock
+  my $mode = CFG_SCOPE();
   return 1 if $mode eq 'any';
   return lc($cur) eq lc($save) if $mode eq 'save';
   return lc($cur) eq lc($lock) if $mode eq 'lock';
@@ -242,11 +312,11 @@ sub onMapChange {
   my $atkAuto = int($config{attackAuto} // 0);
   my $atkMode = CFG_ATTACK() ? ($atkAuto==0 ? 'RESPECT-NO-ATTACK' : 'OVERRIDE') : 'HYBRID';
 
-  message sprintf("[SmartAttackSkill] Map: %s | scope=%s → %s | smart=%s | table=%s | order=%s | lv=%d factor=%.2f | attack=%s (attackAuto=%d) | SNT=%s\n",
+  message sprintf("[SmartAttackSkill] Map: %s | scope=%s -> %s | smart=%s | table=%s | order=%s | lv=%d factor=%.2f | attack=%s (attackAuto=%d) | minSP=%d | SNT=%s\n",
     $where,
     (defined CFG_USE_SAVE() || defined CFG_USE_LOCK()) ? 'flags' : CFG_SCOPE(),
     $S{active_scope}?'ACTIVE':'INACTIVE', _smart_cfg_file(), CFG_TABLEFILE(), CFG_ORDER(), CFG_LV(), CFG_FACTOR(),
-    $atkMode, $atkAuto, ($S{snt_detected}?'YES':'NO')),
+    $atkMode, $atkAuto, CFG_MIN_SP(), ($S{snt_detected}?'YES':'NO')),
     $S{active_scope} ? "success" : "info";
 }
 
@@ -270,12 +340,10 @@ sub _load_plugin_config {
   while (my $line = <$fh>) {
     $ln++;
     $line =~ s/^\x{FEFF}//;
-    next if $line =~ /^\s*#/ || $line =~ /^\s*$/ || $line =~ /^\s*\[.*?\]\s*$/; # skip INI headers
+    next if $line =~ /^\s*#/ || $line =~ /^\s*$/ || $line =~ /^\s*\[.*?\]\s*$/;
     chomp $line;
     if ($line =~ /^\s*([A-Za-z0-9_.]+)\s+(.*?)\s*$/) {
       $P{$1} = $2;
-    } else {
-      # quiet for unknown lines
     }
   }
   close $fh;
@@ -390,10 +458,12 @@ sub _load_table_rows {
     my $mob_ge   = _parse_cond_num($c[3] // '');
     my $range_le = _parse_cond_num($c[4] // '');
     my $sp_ge    = _parse_cond_num($c[5] // '');
+    my $lv       = _parse_cond_num($c[6] // '');
 
     push @rows, {
       skill=>$skill, enable=>$enable, factor=>$factor,
       mob_ge=>$mob_ge, range_le=>$range_le, sp_ge=>$sp_ge,
+      lv=>$lv,
       order_idx=>$line_no,
     };
   }
@@ -421,9 +491,13 @@ sub _build_rotation {
     $conds{range_le} = $r->{range_le} if defined $r->{range_le} && $r->{range_le} > 0;
     $conds{sp_ge}    = $r->{sp_ge}    if defined $r->{sp_ge}    && $r->{sp_ge}    > 0;
 
+    my $skill_lv = (defined $r->{lv} && $r->{lv} > 0) ? $r->{lv} : CFG_LV();
+
     my $e = {
       id=>$id, name=>($name//$r->{skill}), handle=>($handle//''),
-      lv=>CFG_LV(), factor=>($r->{factor}//CFG_FACTOR()), conds=>\%conds,
+      lv=>$skill_lv,
+      factor=>($r->{factor}//CFG_FACTOR()), 
+      conds=>\%conds,
       next_ready=>0.0, last_ms=>0, ema_ms=>undef, last_ack=>0.0,
       fail_streak=>0, fail_bias_ms=>0,
       order_idx=>$r->{order_idx},
@@ -441,8 +515,8 @@ sub _build_rotation {
   my @order = map { $_->{id} } @entries;
   $S{SK_ORDER} = \@order;
 
-  my @summ = map { sprintf("%s(@%.2f)%s%s%s->%d",
-    $_->{name}, $_->{factor},
+  my @summ = map { sprintf("%s(@%.2f)lv%d%s%s%s->%d",
+    $_->{name}, $_->{factor}, $_->{lv},
     (exists $_->{conds}->{mob_ge}   ? "[mob>=".$_->{conds}->{mob_ge}."]"   : ""),
     (exists $_->{conds}->{range_le} ? "[range<=".$_->{conds}->{range_le}."]": ""),
     (exists $_->{conds}->{sp_ge}    ? "[sp>=".$_->{conds}->{sp_ge}."]"     : ""),
@@ -501,6 +575,16 @@ sub _conds_ok {
   return 1;
 }
 
+sub _has_valid_target {
+  return 0 unless $char && $char->{target};
+  
+  my $target = Actor::get($char->{target});
+  return 0 unless $target;
+  return 0 if $target->{dead};
+  
+  return 1;
+}
+
 # ---------------- packets ----------------
 sub onSelfSkillUsed {
   my (undef, $args) = @_;
@@ -541,7 +625,7 @@ sub onSkillUseFailed {
   if (!$sk) {
     $S{inflight} = 0; $S{inflight_skill_id} = undef;
     for my $id (@{ $S{SK_ORDER} }) { $S{SK}->{$id}->{next_ready} = $now + 0.30 }
-    debug "[SmartAttackSkill] FAIL (unknown) → global 300ms\n";
+    debug "[SmartAttackSkill] FAIL (unknown) -> global 300ms\n";
     return;
   }
 
@@ -554,15 +638,15 @@ sub onSkillUseFailed {
     my $add = FAIL_ADD_MS() + (20 * ($sk->{fail_streak}-1));
     $add = 200 if $add > 200;
     $sk->{fail_bias_ms} += $add;
-	$sk->{fail_bias_ms} = 500 if $sk->{fail_bias_ms} > 500;  # จำกัด 500ms
+    $sk->{fail_bias_ms} = 500 if $sk->{fail_bias_ms} > 500;
 
     my $retry_ms = _predicted_ms_for($sk);
     $sk->{next_ready} = $now + ($retry_ms / 1000.0);
-    debug sprintf("[SmartAttackSkill] FAIL Mid-Delay %s → bias+=%d (bias=%d) retry %dms\n",
+    debug sprintf("[SmartAttackSkill] FAIL Mid-Delay %s -> bias+=%d (bias=%d) retry %dms\n",
       $sk->{name}, $add, $sk->{fail_bias_ms}, $retry_ms);
   } else {
     $sk->{next_ready} = $now + 0.30;
-    debug sprintf("[SmartAttackSkill] FAIL %s → wait 300ms\n", $sk->{name});
+    debug sprintf("[SmartAttackSkill] FAIL %s -> wait 300ms\n", $sk->{name});
   }
 
   $S{inflight}          = 0;
@@ -600,7 +684,7 @@ sub _antiflood_ok_or_delay {
       my $cool = $now + (COOLDOWN_AFTER_LIMIT_MS() / 1000.0);
       $S{SK}->{$id}->{next_ready} = $cool if $S{SK}->{$id}->{next_ready} < $cool;
     }
-    debug sprintf("[SmartAttackSkill] AntiFlood: hit %d/10s → cooldown %dms\n", $cnt, COOLDOWN_AFTER_LIMIT_MS());
+    debug sprintf("[SmartAttackSkill] AntiFlood: hit %d/10s -> cooldown %dms\n", $cnt, COOLDOWN_AFTER_LIMIT_MS());
     return 0;
   }
   return 1;
@@ -620,30 +704,27 @@ sub _predicted_ms_for {
   return $ms + $jit;
 }
 
-# ---------------- override melee: take over Core 'attack' ----------------
+# ---------------- override melee ----------------
 sub _maybe_take_over_melee {
-  # Guard SmartRouteAI (ลำดับแรก!)
   if (eval { SmartRouteAI::isTraveling() }) {
       return 0;
   }
   
-  return 0 unless CFG_ATTACK();                                 # must be in override mode
+  return 0 unless CFG_ATTACK();
   my $atkAuto = int($config{attackAuto} // 0);
-  return 0 unless $atkAuto > 0;                                 # respect attackAuto=0
+  return 0 unless $atkAuto > 0;
   return 0 unless $S{active_scope};
   return 0 if $S{inflight};
   return 0 unless @{$S{SK_ORDER} // []};
 
-  # prevent Core from re-queue 'attack' during short corridor
   if ($S{override_hold_until} && time() < $S{override_hold_until}) {
     if (AI::action eq 'attack') { AI::dequeue(); }
     return 1;
   }
 
-  # drop current Core 'attack' then hold a short corridor to cast
   if (AI::action eq 'attack') {
     AI::dequeue();
-    $S{override_hold_until} = time() + 1.0;  # 600ms corridor
+    $S{override_hold_until} = time() + 1.0;
     debug "[SmartAttackSkill] override: drop Core 'attack' state, taking over.\n";
     return 1;
   }
@@ -652,26 +733,27 @@ sub _maybe_take_over_melee {
 
 # ---------------- AI loop ----------------
 sub onAI {
-  # Guard SmartRouteAI (ลำดับแรก!)
   if (eval { SmartRouteAI::isTraveling() }) {
-      return;
+      return unless CFG_DURING_ROUTE();
   }
   
   return unless CFG_ENABLED() && $S{active_scope} && $char;
-  return if $char->{dead} || $char->{sit} || ($char->{sp}//0) < MIN_SP();
+  return if $char->{dead} || $char->{sit};
+  
+  my $min_sp = CFG_MIN_SP();
+  return if ($char->{sp}//0) < $min_sp;
+  
   return unless @{ $S{SK_ORDER} };
 
-  # override: take over melee if attackAuto=1/2
   _maybe_take_over_melee();
 
   my $now     = time();
   my $atkAuto = int($config{attackAuto} // 0);
 
-  # respect attackAuto=0 even in override mode
   return if (CFG_ATTACK() && $atkAuto == 0);
 
   if ($S{inflight} && $now > $S{inflight_deadline}) {
-    debug "[SmartAttackSkill] inflight timeout → reset\n";
+    debug "[SmartAttackSkill] inflight timeout -> reset\n";
     $S{inflight} = 0; $S{inflight_skill_id} = undef;
   }
   return if $S{inflight};
@@ -701,6 +783,8 @@ sub onAI {
 sub _useSkill {
   my ($id) = @_;
   my $sk = $S{SK}->{$id} or return;
+
+  return unless _has_valid_target();
 
   $S{inflight}          = 1;
   $S{inflight_skill_id} = $id;
@@ -738,10 +822,10 @@ sub onSmartConfigReload {
 }
 
 # ---------------- banner ----------------
-BEGIN {
-  message "==========================================================\n","system";
-  message "[SmartAttackSkill] v3.7 Loaded — profile-aware + SmartCore + Override melee + path-safe\n","system";
-  message "==========================================================\n","system";
-}
+message "==========================================================\n","system";
+message "[SmartAttackSkill] v3.8 Loaded - Complete Edition\n","system";
+message "New: Min SP guard | During route | Level per skill\n","system";
+message "     Target guard | smartdiag skill command\n","system";
+message "==========================================================\n","system";
 
 1;

@@ -1,6 +1,6 @@
 #==========================================================
-# SmartConfigBootstrap.pl v3.2 (Profile-aware Fixed)
-# รองรับ: ปลั๊กอินทั้งหมด 10 ตัว + สร้างใน profiles/botX
+# SmartConfigBootstrap.pl v3.3 (Profile-aware + Updated)
+# รองรับ: ปลั๊กอินทั้งหมด 10 ตัว + SmartRouteAI backup
 #==========================================================
 package SmartConfigBootstrap;
 
@@ -24,7 +24,7 @@ BEGIN {
             if ($profile && $profile ne '' && $profile ne 'default') {
                 my $pdir = "profiles/$profile";
                 return "$pdir/smart.txt" if -d $pdir;
-                return "$pdir/smart.txt";  # Return even if not exist yet
+                return "$pdir/smart.txt";
             }
             return Settings::getControlFilename('smart.txt');
         };
@@ -41,16 +41,16 @@ BEGIN {
 }
 
 my $hooks;
-Plugins::register('SmartConfigBootstrap', 'Smart.txt bootstrap v3.2 (Profile-aware)', \&onUnload);
+Plugins::register('SmartConfigBootstrap', 'Smart.txt bootstrap v3.3 (Updated)', \&onUnload);
 $hooks = Plugins::addHooks(
     ['start3', \&onStart, undef],
 );
 sub onUnload { Plugins::delHooks($hooks) if $hooks; }
 
-# ----------------------- COMPLETE SPEC v3.2 -----------------------
+# ----------------------- COMPLETE SPEC v3.3 -----------------------
 my %SPEC = (
   'SmartCore' => {
-    # Core settings
+    # Core settings - no config needed
   },
 
   'SmartComboSimple' => {
@@ -76,13 +76,14 @@ my %SPEC = (
     smartDeposit_blockRoute     => 1,
     smartDeposit_opCooldown     => '0.3',
     smartDeposit_stepBurst      => 5,
+    smartDeposit_maxPullRounds  => 50,
   },
 
   'SmartAttackSkill' => {
     skill_tester_enabled        => 1,
-    skill_tester_use_in_savemap => 1,
-    skill_tester_use_in_lockmap => 0,
-    skill_tester_attack         => 0,
+    skill_tester_use_in_savemap => 0,
+    skill_tester_use_in_lockmap => 1,
+    skill_tester_attack         => 1,
     skill_tester_lv             => 5,
     skill_tester_factor         => '1.20',
     skill_tester_order          => 'alpha',
@@ -117,11 +118,39 @@ my %SPEC = (
   },
 
   'SmartRouteAI' => {
-    smartRouteAI_enabled        => 0,
-    smartRouteAI_hpCritical     => 30,
-    smartRouteAI_dangerCount    => 5,
-    smartRouteAI_stuckThreshold => 20,
-    smartRouteAI_escapeTeleport => 1,
+    smartRoute_enabled                 => 1,
+    smartRoute_checkInterval           => '0.3',
+    smartRoute_dangerRadius            => 7,
+    smartRoute_dangerCount             => 3,
+    smartRoute_teleMinDistance         => 100,
+    smartRoute_teleCooldown            => '0.5',
+    smartRoute_teleMinSP               => 12,
+    smartRoute_teleWaitSP              => 1,
+    smartRoute_teleWaitSPTimeout       => 5,
+    smartRoute_stuckTimeout            => 8,
+    smartRoute_emergencyHpPercent      => 50,
+    smartRoute_walkIfNoWings           => 1,
+    smartRoute_quitIfNoWings           => 0,
+    smartRoute_attackWhileWalking      => 1,
+    smartRoute_clearPathTimeout        => '3.0',
+    smartRoute_idleTime                => '0.3',
+    smartRoute_pathWidth               => 2,
+    smartRoute_emergencyThreshold      => 3,
+    smartRoute_emergencyNoWaitSP       => 1,
+    smartRoute_returnWaitTimeout       => 3,
+    smartRoute_outsideOnly             => 1,
+    smartRoute_maxPlans                => 3,
+    # Backup values
+    smartRoute_attackAuto              => 1,
+    smartRoute_attackAuto_party        => 1,
+    smartRoute_randomWalk              => 0,
+    smartRoute_randomWalk_inTown       => 0,
+    smartRoute_randomWalk_maxRouteTime => 75,
+    smartRoute_sitAuto_idle            => 1,
+    smartRoute_sitAuto_hp_lower        => 0,
+    smartRoute_sitAuto_sp_lower        => 0,
+    smartRoute_follow                  => 0,
+    smartRoute_followTarget            => '',
   },
 
   'SmartGroundAvoidance' => {
@@ -167,7 +196,7 @@ sub _smart_path_safe {
     if ($profile && $profile ne '' && $profile ne 'default') {
         my $pdir = "profiles/$profile";
         return "$pdir/smart.txt" if -d $pdir;
-        return "$pdir/smart.txt";  # Return path even if not exist
+        return "$pdir/smart.txt";
     }
 
     my $cfg = eval { Settings::getControlFilename('config.txt') } // '';
@@ -391,16 +420,16 @@ sub _ordered_keys {
     my @keys = sort keys %$kv;
     my %prio = map { $_ => 1 } qw(
         smartSimple_enabled smartDeposit_enabled skill_tester_enabled
-        smartLootPriority_enabled smartNearest_enabled smartRouteAI_enabled
+        smartLootPriority_enabled smartNearest_enabled smartRoute_enabled
         smartAvoid_enabled smartTeleHunter_enabled
     );
     return (sort { ($prio{$b}||0) <=> ($prio{$a}||0) || $a cmp $b } @keys);
 }
 
 message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n", "system";
-message "[SmartBootstrap] v3.2 Profile-aware ✓\n", "system";
-message "✅ Creates in: profiles/\$profile/smart.txt\n", "system";
-message "✅ 10 Plugins supported\n", "system";
+message "[SmartBootstrap] v3.3 Updated \n", "system";
+message "Creates in: profiles/\$profile/smart.txt\n", "system";
+message "10 Plugins + SmartRouteAI backup\n", "system";
 message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n", "system";
 
 1;

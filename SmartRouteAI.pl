@@ -59,6 +59,7 @@ my %OV = (
     followTarget
   )],
   snap => {},
+  backup => {},  # ← เพิ่ม: ค่าจาก smart.txt
 );
 
 my %PORT = (
@@ -738,10 +739,65 @@ sub _make_signature { my ($x,$y)=@_; return sprintf('%d,%d@%s', $x,$y,_current_m
 # ---------------------------
 # Runtime Autos
 # ---------------------------
+# ---------------- Load backup values from smart.txt ----------------
+sub _load_backup_from_smart {
+  # Mapping: config key => smart.txt key
+  my %smart_mapping = (
+    attackAuto                    => 'smartRoute_attackAuto',
+    attackAuto_party              => 'smartRoute_attackAuto_party',
+    route_randomWalk              => 'smartRoute_randomWalk',
+    route_randomWalk_inTown       => 'smartRoute_randomWalk_inTown',
+    route_randomWalk_maxRouteTime => 'smartRoute_randomWalk_maxRouteTime',
+    sitAuto_idle                  => 'smartRoute_sitAuto_idle',
+    sitAuto_hp_lower              => 'smartRoute_sitAuto_hp_lower',
+    sitAuto_sp_lower              => 'smartRoute_sitAuto_sp_lower',
+    follow                        => 'smartRoute_follow',
+    followTarget                  => 'smartRoute_followTarget',
+  );
+  
+  # Read from smart.txt (via SmartCore or fallback)
+  my $smart_file = eval { 
+    require SmartCore; 
+    SmartCore::smart_path(); 
+  } // eval { 
+    Settings::getControlFilename('smart.txt') 
+  } // 'control/smart.txt';
+  
+  return unless -e $smart_file;
+  
+  open my $fh, '<:encoding(UTF-8)', $smart_file or return;
+  
+  my %smart_values;
+  while (my $line = <$fh>) {
+    $line =~ s/^\x{FEFF}//;
+    next if $line =~ /^\s*#/ || $line =~ /^\s*$/;
+    next if $line =~ /^\s*\[/;  # skip sections
+    
+    if ($line =~ /^\s*(\S+)\s*=\s*(.+?)\s*$/) {
+      my ($key, $val) = ($1, $2);
+      $smart_values{$key} = $val;
+    }
+  }
+  close $fh;
+  
+  # Map smart.txt values to backup
+  for my $cfg_key (keys %smart_mapping) {
+    my $smart_key = $smart_mapping{$cfg_key};
+    if (exists $smart_values{$smart_key}) {
+      $OV{backup}{$cfg_key} = $smart_values{$smart_key};
+      debug "[SmartRouteAI] Backup: $cfg_key = $smart_values{$smart_key} (from $smart_key)\n";
+    }
+  }
+}
 sub _snapshot_autos {
+  # Load backup from smart.txt first
+  _load_backup_from_smart();
+  
   for my $k (@{$OV{keys}}) {
     $OV{snap}{$k} = exists $config{$k} ? $config{$k} : '';
   }
+  
+  debug "[SmartRouteAI] Snapshot taken\n";
 }
 
 sub _apply_override_autos {
@@ -760,14 +816,42 @@ sub _restore_autos_if_needed {
   my ($why) = @_;
   return unless $OV{auto_override_active};
   
+  # Hard-coded defaults (fallback of fallback)
+  my %defaults = (
+    attackAuto                    => 1,
+    attackAuto_party              => 1,
+    route_randomWalk              => 0,
+    route_randomWalk_inTown       => 0,
+    route_randomWalk_maxRouteTime => 75,
+    sitAuto_idle                  => 1,
+    sitAuto_hp_lower              => 0,
+    sitAuto_sp_lower              => 0,
+    follow                        => 0,
+    followTarget                  => '',
+  );
+  
   for my $k (@{$OV{keys}}) {
-    my $v = $OV{snap}{$k};
-    $v = '' unless defined $v;
-    $config{$k} = $v;
+    my $v;
+    
+    # Priority: snapshot > backup (smart.txt) > defaults
+    if (defined $OV{snap}{$k} && $OV{snap}{$k} ne '') {
+      $v = $OV{snap}{$k};
+    } elsif (exists $OV{backup}{$k}) {
+      $v = $OV{backup}{$k};
+      debug "[SmartRouteAI] $k: using backup from smart.txt = $v\n";
+    } else {
+      $v = $defaults{$k};
+      debug "[SmartRouteAI] $k: using hard default = $v\n";
+    }
+    
+    $config{$k} = defined $v ? $v : '';
   }
   
   $OV{auto_override_active} = 0;
-  message "[SmartRouteAI] Auto restored ($why)\n";
+  message "[SmartRouteAI] Auto restored ($why):\n";
+  for my $k (@{$OV{keys}}) {
+    message "  $k = " . ($config{$k} // '(undef)') . "\n", "info";
+  }
 }
 
 # ---------------------------
