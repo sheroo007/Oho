@@ -1,0 +1,172 @@
+﻿# ============================================
+# SmartRouteAI - เดินทางไป lockMap
+# ============================================
+smartRoute_enabled 1
+smartRoute_checkInterval 0.3
+smartRoute_dangerRadius 7
+smartRoute_dangerCount 3
+smartRoute_teleMinDistance 100
+smartRoute_teleCooldown 0.5
+smartRoute_teleMinSP 12
+smartRoute_teleWaitSP 1
+smartRoute_teleWaitSPTimeout 5
+smartRoute_stuckTimeout 8
+smartRoute_emergencyHpPercent 50
+smartRoute_walkIfNoWings 1
+smartRoute_quitIfNoWings 0
+smartRoute_attackWhileWalking 1
+smartRoute_clearPathTimeout 3.0
+smartRoute_idleTime 0.3
+
+# ============================================
+# SmartAttackSkill - ยิงสกิลอัตโนมัติ
+# ============================================
+skill_tester_enabled 1
+skill_tester_factor 1.2
+skill_tester_lv 5
+skill_tester_order alpha
+skill_tester_use_in_lockmap 1
+skill_tester_use_in_savemap 0
+skill_tester_attack 1
+skill_tester_table_file smart_skill_table.txt
+
+# ============================================
+# SmartNearestTarget - เล็งเป้าใกล้สุด
+# ============================================
+smartNearest_enabled 1
+smartNearest_idleOnly 1
+smartNearest_scanRadius 12
+smartNearest_skipPassive 1
+smartNearest_minHPpct 0
+
+# ============================================
+# SmartTeleportHunter - วิงหามอน
+# ============================================
+smartTeleHunter_enabled 1
+smartTeleHunter_scanRadius 12
+smartTeleHunter_minMonsters 1
+smartTeleHunter_cooldown 0.9
+smartTeleHunter_checkInterval 1.0
+smartTeleHunter_allowDuringRoute 1
+smartTeleHunter_routeMinSeconds 2.0
+
+# ============================================
+# SmartLootPriority - เก็บของอัจฉริยะ
+# ============================================
+smartLootPriority_enabled 1
+smartLootPriority_minMonsters 2
+smartLootPriority_scanRadius 10
+smartLootPriority_quietSeconds 0.8
+smartLootPriority_triggerGreed 1
+smartLootPriority_minDropsForGreed 3
+smartLootPriority_greedRadius 6
+smartLootPriority_minSP 30
+smartLootPriority_hpSafeMin 50
+smartLootPriority_cooldown 1.0
+smartLootPriority_urgentTakeIfNoGreed 1
+smartLootPriority_urgentTakeMaxDist 3
+smartLootPriority_usePickupFlag2 1
+smartLootPriority_urgentRegex Card$|Card Album|Old (Blue|Purple) Box
+
+# ============================================
+# Core Settings (ปิดระหว่างเดินทาง)
+# ============================================
+attackAuto_smart 2
+randomWalk_smart 0
+follow_smart 0
+sitAuto_smart 1[SmartCore]
+
+[SmartComboSimple]
+smartSimple_enabled = 1
+smartSimple_autosell_cmd = autosell
+smartSimple_autosell_delay_ms = 300
+smartSimple_cart_over_pct = 90
+smartSimple_lock_enabled = 1
+smartSimple_over_check_ms = 500
+smartSimple_player_over_pct = 85
+smartSimple_save_enabled = 1
+smartSimple_teleport_cool_ms = 1200
+
+[SmartDepositEngine]
+smartDeposit_enabled = 1
+smartDeposit_blockRoute = 1
+smartDeposit_chunk = 500
+smartDeposit_delay = 0.15
+smartDeposit_direct = 1
+smartDeposit_itemsFile = items_control.txt
+smartDeposit_logLevel = info
+smartDeposit_opCooldown = 0.3
+smartDeposit_stepBurst = 5
+smartDeposit_watchdog = 10
+
+[SmartAttackSkill]
+skill_tester_enabled = 1
+skill_tester_attack = 0
+skill_tester_factor = 1.20
+skill_tester_lv = 5
+skill_tester_order = alpha
+skill_tester_scope = any
+skill_tester_use_in_lockmap = 0
+skill_tester_use_in_savemap = 1
+
+[SmartLootPriority]
+smartLootPriority_enabled = 1
+smartLootPriority_cooldown = 1.0
+smartLootPriority_debug = 0
+smartLootPriority_greedRadius = 6
+smartLootPriority_hpSafeMin = 50
+smartLootPriority_minDropsForGreed = 3
+smartLootPriority_minMonsters = 2
+smartLootPriority_minSP = 30
+smartLootPriority_quietSeconds = 0.8
+smartLootPriority_scanRadius = 10
+smartLootPriority_triggerGreed = 1
+smartLootPriority_urgentRegex = Card$|Card Album|Old (Blue|Purple) Box
+smartLootPriority_urgentTakeIfNoGreed = 1
+smartLootPriority_urgentTakeMaxDist = 3
+smartLootPriority_usePickupFlag2 = 1
+
+[SmartNearestTarget]
+smartNearest_enabled = 1
+smartNearest_attackLockDelay = 2
+smartNearest_idleOnly = 1
+smartNearest_minHPpct = 0
+smartNearest_scanRadius = 12
+smartNearest_skipPassive = 1
+
+[SmartRouteAI]
+smartRouteAI_enabled = 0
+smartRouteAI_dangerCount = 5
+smartRouteAI_escapeTeleport = 1
+smartRouteAI_hpCritical = 30
+smartRouteAI_stuckThreshold = 20
+
+[SmartGroundAvoidance]
+smartAvoid_enabled = 1
+smartAvoid_debug = 0
+smartAvoid_firepillar = 1
+smartAvoid_firewall = 1
+smartAvoid_icewall = 1
+smartAvoid_lordofvermilion = 1
+smartAvoid_meteorstorm = 1
+smartAvoid_method = 1
+smartAvoid_quagmire = 1
+smartAvoid_scanInterval = 0.5
+smartAvoid_step = 6
+smartAvoid_stormgust = 1
+
+[SmartTeleportHunter]
+smartTeleHunter_enabled = 1
+smartTeleHunter_allowDuringRoute = 1
+smartTeleHunter_checkInterval = 1.0
+smartTeleHunter_cooldown = 0.9
+smartTeleHunter_minMonsters = 1
+smartTeleHunter_routeMinSeconds = 2.0
+smartTeleHunter_scanRadius = 12
+
+[SmartAutoReload]
+smart_auto_interval = 1.2
+smart_auto_recursive = 0
+
+[SmartCore]
+

@@ -1,0 +1,19 @@
+# smart_skill_table.txt â Skill rotation for SmartAttackSkill
+#
+# FORMAT (CSV):
+#   [skill],[enable 0|1],[factor],[mob>=N|0],[range<=R|0],[sp>=X|0]
+#
+# NOTES:
+# - "skill" can be:
+#     * Numeric ID (e.g. 2280)
+#     * Internal handle (e.g. NC_AXETORNADO)
+#     * Display name with quotes (e.g. "Axe Tornado")
+# - factor: empty = adaptive auto, number = manual override
+# - Use 0 to disable a condition
+# - Rotation order: controlled by 'skill_tester_order' in smart.txt
+# - Reload: smartreload
+#
+# EXAMPLES:
+NC_AXETORNADO, 1, 1.0, 0, 2, 10
+Bash, 0, 1.10, 0, 0, 10
+
